@@ -32,20 +32,18 @@ locally, offline, in one drag & drop.
 
 ## Usage
 
-### Easiest — double-click
+The app is **two files**: `index.html` + `vendor/libheif-bundle.js`.
+No build step, no dependencies to install.
 
-Open `index.html` in Chrome/Edge/Safari. That's it — it's a single self-contained
-page.
+- **Simplest:** open `index.html` in Chrome, Edge or Safari — done.
+- **Or serve it statically** (any web server works):
 
-### Docker (what the `launch-app.sh` launcher does)
+  ```bash
+  python3 -m http.server 8765
+  # → http://localhost:8765/index.html
+  ```
 
-```bash
-docker build -t photopainter-studio:latest .
-docker run -d --name photopainter-studio -p 8765:80 photopainter-studio:latest
-# → http://localhost:8765
-```
-
-### Then
+Then:
 
 1. Drop your HEIC/JPG/PNG files onto the page.
 2. Pick the fit mode: **cover-crop** (recommended, fills the screen) or
@@ -67,8 +65,7 @@ docker run -d --name photopainter-studio -p 8765:80 photopainter-studio:latest
 
 E2E-tested headlessly on 24 real iPhone HEIC files covering every `irot` value
 (0/1/2/3): all produce a valid 800×480 24-bit BMP with pixels strictly inside
-the 6-color palette. See `test-e2e.html` / `e2e-heic.html` — they load the real
-`index.html` in an iframe and drive `handleFiles()` with real `File` objects.
+the 6-color palette.
 
 ## Notes & gotchas
 

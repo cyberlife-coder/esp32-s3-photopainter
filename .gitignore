@@ -1,8 +1,17 @@
 .DS_Store
 node_modules/
-# artefacts de debug locaux (captures, exports sips, HEIC personnels)
-debug-test.heic
+
+# --- fichiers locaux hors dépôt (lanceur, docker, tests, debug) ---
+launch-app.sh
+Dockerfile
+.dockerignore
+AGENTS.md
+test-*.html
+test-*.heic
+test-*.png
+e2e-heic.html
 v_*.png
 o_*.png
 combo_*.png
+debug-test.heic
 *.log
