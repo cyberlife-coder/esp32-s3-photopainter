@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PhotoPainter Studio — préparateur de photos</title>
+<style>
+  :root { --bg:#101418; --card:#1a2129; --acc:#4cc38a; --acc2:#5aa9e6; --txt:#e8edf2; --mut:#8fa0b0; --err:#e6605a; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--txt); }
+  header { padding:20px 28px; background:var(--card); display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; }
+  header .sub { color:var(--mut); font-size:13px; }
+  main { padding:20px 28px; max-width:1200px; margin:0 auto; }
+  #drop { border:2px dashed #3a4a5a; border-radius:14px; padding:40px 20px; text-align:center; color:var(--mut); cursor:pointer; transition:.2s; }
+  #drop.over, #drop:hover { border-color:var(--acc); color:var(--txt); background:#182230; }
+  #drop b { color:var(--acc); }
+  .opts { display:flex; gap:18px; align-items:center; flex-wrap:wrap; margin:18px 0; font-size:14px; }
+  .opts label { display:flex; gap:8px; align-items:center; cursor:pointer; color:var(--mut); }
+  .opts input[type=radio] { accent-color:var(--acc); }
+  button { background:var(--acc); color:#08130d; border:0; border-radius:8px; padding:10px 18px; font-size:14px; font-weight:600; cursor:pointer; }
+  button.sec { background:#2a3644; color:var(--txt); }
+  button:disabled { opacity:.4; cursor:default; }
+  .item { background:var(--card); border-radius:12px; padding:14px; margin-bottom:14px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .item .thumb { width:120px; height:72px; object-fit:cover; border-radius:6px; border:1px solid #33414f; background:#000; }
+  .item .thumb.portrait { width:72px; height:120px; }
+  .item .meta { flex:1; min-width:160px; font-size:13px; }
+  .item .meta .name { font-weight:600; font-size:14px; margin-bottom:4px; word-break:break-all; }
+  .item .meta .dim { color:var(--mut); }
+  .item .actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .item .actions button { padding:7px 12px; font-size:12px; }
+  .ok { color:var(--acc); font-size:12px; margin-top:4px; }
+  .ko { color:var(--err); font-size:12px; margin-top:4px; }
+  .progress { height:4px; background:#2a3644; border-radius:2px; overflow:hidden; margin-top:16px; display:none; }
+  .progress > div { height:100%; background:var(--acc); width:0%; transition:width .2s; }
+  .bar { display:flex; gap:10px; flex-wrap:wrap; margin:18px 0; position:sticky; bottom:14px; background:rgba(16,20,24,.9); backdrop-filter:blur(6px); padding:12px; border-radius:12px; border:1px solid #2a3644; }
+  .zoomwrap { position:relative; cursor:zoom-in; }
+  .zoomwrap .zoom { display:none; position:fixed; z-index:50; image-rendering:pixelated; border:2px solid var(--acc); border-radius:4px; background:#000; max-width:80vw; max-height:80vh; }
+  .zoomwrap.open .zoom { display:block; }
+  #status { font-size:13px; color:var(--mut); min-height:18px; }
+  .hint { font-size:12px; color:var(--mut); margin-top:6px; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🖼️ PhotoPainter Studio</h1>
+  <div class="sub">Prépare vos photos pour le cadre e-paper (800×480 · 6 couleurs) — traitement 100 % local</div>
+</header>
+<main>
+  <div id="drop">
+    <div style="font-size:34px">📥</div>
+    <div style="margin-top:8px"><b>Cliquez</b> ou déposez vos images ici (JPG, PNG, WebP, <b>HEIC</b> — plusieurs à la fois)</div>
+    <div class="hint">Redimensionnement + dithering 6 couleurs (même algorithme que le firmware) — rien ne quitte votre ordinateur</div>
+  </div>
+  <div class="opts">
+    <span style="font-size:13px;color:var(--mut)">Ajustement :</span>
+    <label><input type="radio" name="fit" value="cover" checked> Meilleur remplissage de l'écran (recadrage sans déformation, recommandé)</label>
+    <label><input type="radio" name="fit" value="stretch"> Image entière (étirée aux bords, comme la page officielle)</label>
+    <span class="hint">Toutes les sorties font 800×480 (le format que le firmware rend correctement), sources très grandes comprises</span>
+  </div>
+  <div id="list"></div>
+  <div class="progress" id="prog"><div id="progbar"></div></div>
+  <div class="bar">
+    <button id="btnCard" disabled>💾 Écrire sur la carte SD</button>
+    <span class="hint" style="align-self:center">→ choisissez le dossier <b>06_user_Foundation_img</b> de la carte (Chrome/Edge)</span>
+    <button id="btnAll" class="sec" disabled>⬇️ Tout télécharger</button>
+    <span id="count" class="hint" style="align-self:center"></span>
+    <span id="status"></span>
+  </div>
+</main>
+<script src="vendor/libheif-bundle.js"></script>
+<script>
+// ================= NOYAU (aucun DOM) =================
+const PALETTE = [[0,0,0],[255,255,255],[255,255,0],[255,0,0],[0,0,255],[0,255,0]];
+
+function nearestIdx(r,g,b){
+  let best=0, bd=Infinity;
+  for(let c=0;c<6;c++){
+    const d=(r-PALETTE[c][0])**2+(g-PALETTE[c][1])**2+(b-PALETTE[c][2])**2;
+    if(d<bd){bd=d;best=c;}
+  }
+  return best;
+}
+
+// Dithering Floyd-Steinberg (identique à la page web officielle v1.5.0)
+function dither6(data, w, h){
+  const out = new Uint8ClampedArray(w*h*3);
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      const i=(y*w+x)*4;
+      const r=data[i], g=data[i+1], b=data[i+2];
+      const idx=nearestIdx(r,g,b);
+      const [pr,pg,pb]=PALETTE[idx];
+      const o=i*3/4;
+      out[o]=pr; out[o+1]=pg; out[o+2]=pb;
+      const er=r-pr, eg=g-pg, eb=b-pb;
+      if(x+1<w){ let j=i+4;
+        data[j]=Math.max(0,Math.min(255,data[j]+er*7/16));
+        data[j+1]=Math.max(0,Math.min(255,data[j+1]+eg*7/16));
+        data[j+2]=Math.max(0,Math.min(255,data[j+2]+eb*7/16)); }
+      if(x>0&&y+1<h){ let j=i+(w-1)*4;
+        data[j]=Math.max(0,Math.min(255,data[j]+er*3/16));
+        data[j+1]=Math.max(0,Math.min(255,data[j+1]+eg*3/16));
+        data[j+2]=Math.max(0,Math.min(255,data[j+2]+eb*3/16)); }
+      if(y+1<h){ let j=i+w*4;
+        data[j]=Math.max(0,Math.min(255,data[j]+er*5/16));
+        data[j+1]=Math.max(0,Math.min(255,data[j+1]+eg*5/16));
+        data[j+2]=Math.max(0,Math.min(255,data[j+2]+eb*5/16)); }
+      if(x+1<w&&y+1<h){ let j=i+(w+1)*4;
+        data[j]=Math.max(0,Math.min(255,data[j]+er*1/16));
+        data[j+1]=Math.max(0,Math.min(255,data[j+1]+eg*1/16));
+        data[j+2]=Math.max(0,Math.min(255,data[j+2]+eb*1/16)); }
+    }
+  }
+  return out;
+}
+
+// Encodeur BMP 24 bits (BI_RGB, bottom-up)
+function encodeBMP(w, h, rgb){
+  const rowSize = Math.ceil(w*3/4)*4;
+  const dataSize = rowSize*h;
+  const buf = new ArrayBuffer(54+dataSize);
+  const dv = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  u8[0]=0x42; u8[1]=0x4D;
+  dv.setUint32(2, 54+dataSize, true);
+  dv.setUint32(10, 54, true);
+  dv.setUint32(14, 40, true);
+  dv.setInt32(18, w, true);
+  dv.setInt32(22, h, true);
+  dv.setUint16(26, 1, true);
+  dv.setUint16(28, 24, true);
+  dv.setUint32(30, 0, true);
+  dv.setUint32(34, dataSize, true);
+  dv.setInt32(38, 2835, true);
+  dv.setInt32(42, 2835, true);
+  for(let y=h-1;y>=0;y--){
+    let off = 54 + (h-1-y)*rowSize;
+    for(let x=0;x<w;x++){
+      const i=(y*w+x)*3;
+      u8[off+x*3+0]=rgb[i+2];
+      u8[off+x*3+1]=rgb[i+1];
+      u8[off+x*3+2]=rgb[i];
+    }
+  }
+  return new Blob([buf], {type:'image/bmp'});
+}
+// ================= FIN NOYAU =================
+
+const results = [];
+const listEl = document.getElementById('list');
+const dropEl = document.getElementById('drop');
+const statusEl = document.getElementById('status');
+const progEl = document.getElementById('prog');
+const progBar = document.getElementById('progbar');
+
+function setStatus(msg, err){ statusEl.textContent = msg; statusEl.style.color = err ? 'var(--err)' : 'var(--mut)'; }
+
+dropEl.addEventListener('click', () => document.getElementById('fileInput').click());
+const fileInput = document.createElement('input');
+fileInput.type='file'; fileInput.id='fileInput'; fileInput.accept='image/*,.heic,.heif'; fileInput.multiple=true; fileInput.className='hidden';
+document.body.appendChild(fileInput);
+fileInput.addEventListener('change', () => { handleFiles(fileInput.files); fileInput.value=''; });
+
+['dragover','dragenter'].forEach(e => dropEl.addEventListener(e, ev => { ev.preventDefault(); dropEl.classList.add('over'); }));
+['dragleave','drop'].forEach(e => dropEl.addEventListener(e, ev => { ev.preventDefault(); dropEl.classList.remove('over'); }));
+dropEl.addEventListener('drop', ev => handleFiles(ev.dataTransfer.files));
+
+// ---- file d'attente : plusieurs glisser-déposer se traitent l'un après l'autre, sans se mélanger ----
+const queue = [];
+const seen = new Set();   // dédoublonnage : un même fichier (nom+taille+date) déjà présent est ignoré
+let working = false;
+
+function fileKey(f){ return f.name+'\u0000'+f.size+'\u0000'+(f.lastModified||''); }
+
+function handleFiles(files){
+  const imgs = [...files].filter(f => f.type.startsWith('image/') || /\.(heic|heif|jpe?g|png|webp|bmp|gif)$/i.test(f.name));
+  if(!imgs.length) return;
+  let added = 0;
+  for(const f of imgs){
+    const k = fileKey(f);
+    if(seen.has(k)) continue;
+    seen.add(k);
+    queue.push(f);
+    added++;
+  }
+  if(added){
+    setStatus(added===1 && queue.length===1 ? `Traitement de ${queue[0].name}…` : `+${added} photo(s) en file d'attente (${queue.length} au total)…`);
+  } else {
+    setStatus('Ces photo(s) sont déjà dans la liste — rien à ajouter.');
+  }
+  work();
+}
+async function work(){
+  if(working) return;   // un traitement à la fois ; les drops suivants attendent dans la file
+  working = true;
+  const btnCard = document.getElementById('btnCard'), btnAll = document.getElementById('btnAll');
+  btnCard.disabled = true; btnAll.disabled = true;
+  progEl.style.display='block';
+  const fit = document.querySelector('input[name=fit]:checked').value;
+  let done = 0, failed = 0;
+  while(queue.length){
+    const f = queue.shift();
+    done++;
+    setStatus(`Traitement : ${f.name}${queue.length ? ' ('+queue.length+' restantes)' : ''}…`);
+    progBar.style.width = Math.min(99, Math.round(100*done/(done+queue.length)))+'%';
+    try { await processOne(f, fit); }
+    catch(err){
+      console.error('Échec', f.name, err);
+      failed++;
+      results.push({ error:true, name:f.name, note:'❌ Échec : '+(err&&err.message||err) });
+      renderItem(results[results.length-1]);
+      updateCount();
+    }
+  }
+  progBar.style.width='100%';
+  const ok = results.filter(r=>!r.error).length;
+  setStatus(failed ? `Terminé : ${ok} prête(s), ${failed} échec(s).` : `Terminé : ${ok} photo(s) prête(s). Écrivez-les sur la carte SD ⤵`, failed>0);
+  working = false;
+  setTimeout(()=>{ progEl.style.display='none'; progBar.style.width='0%'; }, 1500);
+  btnCard.disabled = ok===0; btnAll.disabled = ok===0;
+}
+
+// HEIC : 1) décodage natif (Safari, Chrome/Edge macOS via ImageIO) — l'EXIF est alors
+// appliqué par le navigateur ; 2) sinon décodeur WASM libheif embarqué (offline).
+// Ce bundle applique déjà les propriétés transformatives (irot/imir) dans display() :
+// les pixels restitués sont orientés pour l'affichage — aucune rotation manuelle.
+let __heif = null;   // module libheif instancié (mémoïsé : l'init du WASM est synchrone)
+async function heifLib(){
+  if(__heif) return __heif;
+  let L = window.libheif;
+  if(typeof L === 'function') L = L({});              // usine emscripten → module
+  if(L && typeof L.then === 'function') L = await L;
+  if(L && L.default && !L.HeifDecoder) L = L.default;
+  if(L && typeof L.then === 'function') L = await L;
+  if(!L || typeof L.HeifDecoder !== 'function') throw new Error('libheif : HeifDecoder absent');
+  return __heif = L;
+}
+function heifLargest(images){ let best=images[0], ba=-1; for(const im of images){ const a=im.get_width()*im.get_height(); if(a>ba){ba=a;best=im;} } return best; }
+async function heicToBlob(file){
+  const u0 = URL.createObjectURL(file);
+  try {
+    const t = new Image();
+    await new Promise((res, rej) => { t.onload=res; t.onerror=rej; t.src=u0; });
+    if(t.naturalWidth > 0){ URL.revokeObjectURL(u0); return { blob: file, how: 'natif' }; }
+  } catch(e){}
+  URL.revokeObjectURL(u0);
+  // ---- décodage WASM libheif (offline) ----
+  const L = await heifLib();
+  const buf = await file.arrayBuffer();
+  const images = new L.HeifDecoder().decode(new Uint8Array(buf));
+  if(!images || !images.length) throw new Error('libheif : aucune image décodée');
+  const img = heifLargest(images);
+  const w = img.get_width(), h = img.get_height();
+  const canvas = document.createElement('canvas'); canvas.width=w; canvas.height=h;
+  const ctx = canvas.getContext('2d');
+  const idata = ctx.createImageData(w, h);
+  await new Promise((res, rej) => img.display(idata, d => d ? res() : rej(new Error('libheif : display null'))));
+  ctx.putImageData(idata, 0, 0);
+  const blob = await new Promise((res, rej) => canvas.toBlob(b => b ? res(b) : rej(new Error('libheif : toBlob null')), 'image/png'));
+  return { blob, how: 'WASM' };
+}
+
+async function processOne(file, fit){
+  const isHeic = /image\/(heic|heif)/.test(file.type) || /\.(heic|heif)$/i.test(file.name);
+  let src = file, heicHow = null;
+  if(isHeic){ const h = await heicToBlob(file); src = h.blob; heicHow = h.how; }
+  const url = URL.createObjectURL(src);
+  const img = new Image();
+  await new Promise((res, rej) => { img.onload=res; img.onerror=rej; img.src=url; });
+
+  // orientation naturelle (EXIF appliqué automatiquement par le navigateur)
+  // Sortie toujours 800×480 : GUI_ReadBmp_RGB_6Color() du firmware ne rend
+  // correctement que ce format (un BMP portrait 480×800 afficherait un carré
+  // 480×480 à gauche, le reste du buffer restant non initialisé).
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  const tw = 800, th = 480;
+
+  const canvas = document.createElement('canvas');
+  canvas.width=tw; canvas.height=th;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  let note = '';
+  if(fit==='stretch'){
+    ctx.drawImage(img, 0, 0, tw, th);
+    note = 'étirée';
+  } else if(Math.max(tw/iw, th/ih) <= 1){
+    // image assez grande : recadrage "cover" centré → remplit 100 % de l'écran
+    const scale = Math.max(tw/iw, th/ih);
+    const sw = tw/scale, sh = th/scale;
+    const sx = (iw-sw)/2, sy = (ih-sh)/2;
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, tw, th);
+    note = `recadrée depuis ${iw}×${ih}`;
+  } else {
+    // image plus petite que l'écran : agrandie proprement (bilineaire HD) et centrée sur fond blanc
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, tw, th);
+    const scale = Math.min(tw/iw, th/ih);
+    const dw = Math.round(iw*scale), dh = Math.round(ih*scale);
+    ctx.drawImage(img, Math.round((tw-dw)/2), Math.round((th-dh)/2), dw, dh);
+    note = `petite (${iw}×${ih}) — agrandie à ${dw}×${dh}, centrée sur fond blanc`;
+  }
+  if(heicHow) note += (note ? ' · ' : '') + 'HEIC (décodé ' + heicHow + ')';
+  const imageData = ctx.getImageData(0, 0, tw, th);
+  const rgb = dither6(imageData.data, tw, th);
+  const blob = encodeBMP(tw, th, rgb);
+
+  const base = file.name.replace(/\.[^.]+$/, '') || 'photo';
+  // nom de sortie unique : IMG_1133.jpg + IMG_1133.heic → IMG_1133.bmp puis IMG_1133_2.bmp (pas d'écrasement)
+  let bmpName = base + '.bmp', n = 2;
+  while(results.some(r => r && r.name === bmpName)) bmpName = base + '_' + (n++) + '.bmp';
+  const outUrl = URL.createObjectURL(blob);
+
+  results.push({ name: bmpName, blob, w: tw, h: th, url: outUrl, origUrl: url, note });
+  renderItem(results[results.length-1]);
+  updateCount();
+  // NB : on ne révoque pas `url` (origUrl) — la vignette et surtout le zoom
+  // caché de l'original peuvent encore être en cours de chargement ici.
+}
+
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function renderItem(r){
+  if(r.error){
+    const div = document.createElement('div');
+    div.className='item';
+    div.innerHTML = `<div class="meta" style="width:100%;border:1px solid var(--err);border-radius:8px"><div class="name">${esc(r.name)}</div><div class="dim">${esc(r.note)}</div></div>`;
+    listEl.prepend(div);
+    return;
+  }
+  const div = document.createElement('div');
+  div.className='item';
+  div.innerHTML = `
+    <div class="zoomwrap">
+      <img class="thumb" src="${r.origUrl}" title="original — cliquer pour zoomer">
+      <img class="thumb zoom" src="${r.origUrl}">
+    </div>
+    <div class="zoomwrap" style="display:flex;align-items:center;gap:10px">
+      <span style="font-size:20px">→</span>
+      <img class="thumb" src="${r.url}" title="résultat 6 couleurs — cliquer pour zoomer">
+      <img class="thumb zoom" src="${r.url}">
+    </div>
+    <div class="meta">
+      <div class="name">${esc(r.name)}</div>
+      <div class="dim">${r.w}×${r.h} · ${(r.blob.size/1024).toFixed(0)} Ko${r.note?' · '+esc(r.note):''}</div>
+      <div class="ok">✓ prête</div>
+    </div>
+    <div class="actions">
+      <button class="sec" data-dl="${esc(r.name)}">⬇️</button>
+      <button class="sec" data-send="${esc(r.name)}">📡 au cadre</button>
+    </div>`;
+  listEl.prepend(div);
+  // zoom
+  div.querySelectorAll('.zoomwrap').forEach(zw => {
+    const thumb = zw.querySelector('.thumb:not(.zoom)');
+    const zoom = zw.querySelector('.zoom');
+    thumb.addEventListener('click', () => {
+      document.querySelectorAll('.zoomwrap.open').forEach(o => o.classList.remove('open'));
+      const rect = thumb.getBoundingClientRect();
+      const scale = Math.min((0.8*innerWidth)/r.w, (0.8*innerHeight)/r.h, 6);
+      zoom.style.width = (r.w*scale)+'px'; zoom.style.height=(r.h*scale)+'px';
+      zoom.style.left = Math.max(10, rect.left + rect.width/2 - (r.w*scale)/2) + 'px';
+      zoom.style.top = Math.max(10, rect.top + rect.height/2 - (r.h*scale)/2) + 'px';
+      zw.classList.add('open');
+    });
+  });
+  document.addEventListener('click', e => { if(!e.target.closest('.zoomwrap')) div.querySelectorAll('.zoomwrap.open').forEach(o=>o.classList.remove('open')); });
+  const dl = div.querySelector('[data-dl]');
+  dl.addEventListener('click', () => download(r));
+  const sb = div.querySelector('[data-send]');
+  sb.addEventListener('click', () => sendToDevice(r, sb));
+}
+
+function download(r){
+  const a = document.createElement('a');
+  a.href = r.url; a.download = r.name;
+  a.click();
+}
+
+function updateCount(){
+  const ok = results.filter(r=>!r.error).length;
+  const c = document.getElementById('count');
+  if(c) c.textContent = ok ? `${ok} photo(s) prête(s)` : '';
+}
+
+async function sendToDevice(r, btn){
+  btn.disabled = true;
+  setStatus('Envoi vers 192.168.4.1 (mode 2)…');
+  try {
+    await fetch('http://192.168.4.1/dataUP', { method:'POST', body: r.blob, mode:'no-cors' });
+    setStatus(`✓ « ${r.name} » envoyée — le cadre va s'afficher d'ici quelques secondes (rafraîchissement e-paper ~25 s)`);
+  } catch(e) {
+    setStatus('Échec : '+e.message+' — le navigateur doit être connecté au Wi-Fi esp_network et le cadre en mode 2', true);
+  }
+  btn.disabled = false;
+}
+
+document.getElementById('btnAll').addEventListener('click', () => {
+  const ok = results.filter(r=>!r.error);
+  ok.forEach((r,i) => setTimeout(()=>download(r), i*350));
+  setStatus(`${ok.length} téléchargement(s) lancé(s)…`);
+});
+
+document.getElementById('btnCard').addEventListener('click', async () => {
+  if(!window.showDirectoryPicker){ alert('Votre navigateur ne supporte pas l\'écriture directe (utilisez Chrome ou Edge). Utilisez « Tout télécharger » à la place.'); return; }
+  const btn = document.getElementById('btnCard');
+  const okAll = results.filter(r=>!r.error);
+  if(!okAll.length) return;
+  let dir;
+  try { dir = await window.showDirectoryPicker(); }
+  catch(e){
+    if(e && e.name==='AbortError') setStatus('Sélection annulée.');
+    else setStatus('Échec du choix du dossier : '+(e&&e.message||e), true);
+    return;
+  }
+  btn.disabled = true;
+  try {
+    setStatus('Écriture sur la carte…');
+    let i=0;
+    for(const r of okAll){
+      i++;
+      setStatus(`Écriture ${i}/${okAll.length} : ${r.name}`);
+      const fh = await dir.getFileHandle(r.name, { create:true });
+      const w = await fh.createWritable();
+      await w.write(r.blob);
+      await w.close();
+    }
+    setStatus(`✓ ${okAll.length} image(s) écrite(s) dans « ${dir.name} » — mettez la carte dans le cadre et appuyez sur BOOT.`);
+  } catch(e){
+    setStatus('Échec : '+(e&&e.message||e)+' — vérifiez que la carte SD est insérée et que le dossier choisi est le bon.', true);
+  }
+  btn.disabled = false;
+});
+</script>
+</body>
+</html>

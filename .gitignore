@@ -1,0 +1,8 @@
+.DS_Store
+node_modules/
+# artefacts de debug locaux (captures, exports sips, HEIC personnels)
+debug-test.heic
+v_*.png
+o_*.png
+combo_*.png
+*.log
