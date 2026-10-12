@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>e2e HEIC → BMP</title></head>
+<body style="font-family:monospace;font-size:13px">
+<h3>Pipeline complet (vrai index.html en iframe) sur test-photo.heic</h3>
+<pre id="out" style="white-space:pre-wrap;background:#f4f4f4;padding:10px">début…</pre>
+<div id="img" style="display:flex;gap:20px;flex-wrap:wrap;margin-top:10px"></div>
+<script>
+// Teste le VRAI outil (index.html chargé en iframe, même origine) : aucune copie de code.
+const out = document.getElementById('out');
+const imgBox = document.getElementById('img');
+function log(...a){ out.textContent += a.join(' ') + '\n'; }
+function show(label, srcUrl, w){
+  const d=document.createElement('div');
+  d.style.cssText='text-align:center;border:1px solid #ccc;padding:6px';
+  d.innerHTML='<div style="margin-bottom:4px">'+label+'</div>';
+  const im=document.createElement('img'); im.src=srcUrl; im.style.width=(w||260)+'px';
+  d.appendChild(im); imgBox.appendChild(d);
+}
+const PAL = new Set(['0,0,0','255,255,255','255,255,0','255,0,0','0,0,255','0,255,0']);
+(async () => {
+  const fr = document.createElement('iframe');
+  fr.style.cssText='width:900px;height:400px';
+  fr.src = '/';
+  document.body.appendChild(fr);
+  await new Promise(r => fr.onload = r);
+  const win = fr.contentWindow;
+  const results = win.eval('results');
+  if(typeof win.handleFiles !== 'function') { log('ERREUR : handleFiles inaccessible'); return; }
+
+  const buf = await (await fetch('test-photo.heic')).arrayBuffer();
+  const file = new File([buf], 'test-photo.HEIC', {type:'image/heic'});
+
+  const n0 = results.length;
+  const t0 = Date.now();
+  win.handleFiles([file]);
+  while(results.length === n0) await new Promise(r => setTimeout(r, 120));
+  const r = results[results.length-1];
+  if(!r || r.error){ log('ERREUR : ' + (r && r.note || 'aucun résultat')); return; }
+  log('① traité en ' + (Date.now()-t0) + ' ms — note : ' + r.note);
+
+  // ② BMP : en-tête + taille
+  const bb = new Uint8Array(await r.blob.arrayBuffer());
+  const dv = new DataView(bb.buffer);
+  const w = dv.getInt32(18,true), h = dv.getInt32(22,true), bits = dv.getUint16(28,true);
+  log('② BMP ' + bb.length + ' o (attendu 1152054) ' + (bb.length===1152054?'✓':'✗')
+    + ' | ' + w + 'x' + h + ' ' + (w===800&&h===480?'✓':'✗') + ' | ' + bits + ' bits ' + (bits===24?'✓':'✗'));
+
+  // ③ tous les pixels dans la palette 6 couleurs
+  const rowSize = Math.ceil(w*3/4)*4;
+  let bad = 0; const colors = {};
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    const o = 54 + (h-1-y)*rowSize + x*3;
+    const rgb = bb[o+2]+','+bb[o+1]+','+bb[o];
+    if(!PAL.has(rgb)) bad++;
+    colors[rgb] = (colors[rgb]||0)+1;
+  }
+  const set = Object.keys(colors).sort();
+  log('③ pixels hors palette : ' + bad + ' ' + (bad===0?'✓':'✗') + ' — ' + set.length + ' couleurs : ' + set.join(' | '));
+
+  // ④ vérification VISUELLE de l'orientation (les tests précédents ne regardaient
+  // que les dimensions — un paysage correct était marqué ✗ à tort, et un portrait
+  // couché passait ✓). On affiche le BMP : à confirmer à l'œil.
+  show('BMP 800×480 6 couleurs — vérifier orientation à l\'œil', URL.createObjectURL(r.blob), 400);
+  log('④ ouvrez la page : l\'image ci-dessus doit montrer la scène droite (pas de gens couchés)');
+  log('FIN ' + (bb.length===1152054 && w===800 && h===480 && bits===24 && bad===0 ? '✓' : '✗'));
+})().catch(e => log('ERREUR :', e && (e.stack || e.message || e)));
+</script>
+</body></html>

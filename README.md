@@ -32,18 +32,24 @@ locally, offline, in one drag & drop.
 
 ## Usage
 
-The app is **two files**: `index.html` + `vendor/libheif-bundle.js`.
-No build step, no dependencies to install.
+### Docker (recommended — one command)
 
-- **Simplest:** open `index.html` in Chrome, Edge or Safari — done.
-- **Or serve it statically** (any web server works):
+```bash
+docker build -t photopainter-studio .
+docker run -d --name photopainter-studio -p 8765:80 photopainter-studio
+# → http://localhost:8765
+```
 
-  ```bash
-  python3 -m http.server 8765
-  # → http://localhost:8765/index.html
-  ```
+On macOS, `launch-app.sh` does it all: starts colima/docker if needed, frees the
+port, runs the container and opens the browser.
 
-Then:
+### Or just open the file
+
+The app is **two files** (`index.html` + `vendor/libheif-bundle.js`) — opening
+`index.html` in Chrome/Edge/Safari works too, or serve it with any static
+server (`python3 -m http.server`).
+
+### Then
 
 1. Drop your HEIC/JPG/PNG files onto the page.
 2. Pick the fit mode: **cover-crop** (recommended, fills the screen) or

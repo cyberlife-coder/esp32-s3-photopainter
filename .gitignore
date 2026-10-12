@@ -1,15 +1,7 @@
 .DS_Store
 node_modules/
 
-# --- fichiers locaux hors dépôt (lanceur, docker, tests, debug) ---
-launch-app.sh
-Dockerfile
-.dockerignore
-AGENTS.md
-test-*.html
-test-*.heic
-test-*.png
-e2e-heic.html
+# --- artefacts de debug locaux (jamais dans le dépôt) ---
 v_*.png
 o_*.png
 combo_*.png
